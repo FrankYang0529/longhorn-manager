@@ -25,6 +25,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/kubernetes/pkg/controller"
+	"k8s.io/utils/pointer"
 
 	bimtypes "github.com/longhorn/backing-image-manager/pkg/types"
 
@@ -609,6 +610,7 @@ func (c *BackingImageDataSourceController) generateBackingImageDataSourcePodMani
 					Image:           bimImage,
 					ImagePullPolicy: imagePullPolicy,
 					Command:         cmd,
+					SecurityContext: &v1.SecurityContext{Privileged: pointer.Bool(true)},
 					ReadinessProbe: &v1.Probe{
 						ProbeHandler: v1.ProbeHandler{
 							TCPSocket: &v1.TCPSocketAction{
@@ -650,6 +652,26 @@ func (c *BackingImageDataSourceController) generateBackingImageDataSourcePodMani
 			NodeName:      bids.Spec.NodeID,
 			RestartPolicy: v1.RestartPolicyNever,
 		},
+	}
+
+	bsCredentialSetting, err := c.ds.GetSetting(types.SettingNameBackupTargetCredentialSecret)
+	if err != nil {
+		return nil, err
+	}
+	if bsCredentialSetting.Value != "" {
+		podSpec.Spec.Volumes = append(podSpec.Spec.Volumes, v1.Volume{
+			Name: "backup-target-credential",
+			VolumeSource: v1.VolumeSource{
+				Secret: &v1.SecretVolumeSource{
+					SecretName: bsCredentialSetting.Value,
+				},
+			},
+		})
+		podSpec.Spec.Containers[0].VolumeMounts = append(podSpec.Spec.Containers[0].VolumeMounts, v1.VolumeMount{
+			Name:      "backup-target-credential",
+			MountPath: "/backup-target-credential",
+			ReadOnly:  true,
+		})
 	}
 
 	registrySecretSetting, err := c.ds.GetSetting(types.SettingNameRegistrySecret)
