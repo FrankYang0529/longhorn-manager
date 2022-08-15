@@ -481,7 +481,7 @@ func (c *BackingImageDataSourceController) syncBackingImageDataSourcePod(bids *l
 		// To avoid restarting backing image data source pod (for file preparation) too quickly or too frequently,
 		// Longhorn will leave failed backing image data source alone if it is still in the backoff period.
 		// If the backoff period pass, Longhorn will recreate the pod and increase the Backoff period for the next possible failure.
-		isValidTypeForRetry := bids.Spec.SourceType == longhorn.BackingImageDataSourceTypeDownload || bids.Spec.SourceType == longhorn.BackingImageDataSourceTypeExportFromVolume
+		isValidTypeForRetry := bids.Spec.SourceType == longhorn.BackingImageDataSourceTypeDownload || bids.Spec.SourceType == longhorn.BackingImageDataSourceTypeDownloadFromBackupTarget || bids.Spec.SourceType == longhorn.BackingImageDataSourceTypeExportFromVolume
 		isInBackoffWindow := true
 		if !newBackingImageDataSource && isValidTypeForRetry {
 			if !c.backoff.IsInBackOffSinceUpdate(bids.Name, time.Now()) {
@@ -500,6 +500,14 @@ func (c *BackingImageDataSourceController) syncBackingImageDataSourcePod(bids *l
 			bids.Status.Message = ""
 			bids.Status.Progress = 0
 			bids.Status.Checksum = ""
+
+			if moreThanLimit, err := c.isMoreThanConcurrentBackingImageRestoreLimit(); err != nil {
+				return err
+			} else if moreThanLimit {
+				log.Infof("Too many backing image restoring, enqueue %s after 60 seconds", bids.Name)
+				c.enqueueBackingImageDataSourceAfter(bids, 60*time.Second)
+			}
+
 			if err := c.createBackingImageDataSourcePod(bids); err != nil {
 				return err
 			}
@@ -779,6 +787,16 @@ func (c *BackingImageDataSourceController) enqueueBackingImageDataSource(backing
 	}
 
 	c.queue.Add(key)
+}
+
+func (c *BackingImageDataSourceController) enqueueBackingImageDataSourceAfter(backingImageDataSource interface{}, duration time.Duration) {
+	key, err := controller.KeyFunc(backingImageDataSource)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %#v: %v", backingImageDataSource, err))
+		return
+	}
+
+	c.queue.AddAfter(key, duration)
 }
 
 func isBackingImageDataSourcePod(obj interface{}) bool {
@@ -1062,4 +1080,28 @@ func (m *BackingImageDataSourceMonitor) sync() {
 
 func (c *BackingImageDataSourceController) isResponsibleFor(bids *longhorn.BackingImageDataSource) bool {
 	return isControllerResponsibleFor(c.controllerID, c.ds, bids.Name, bids.Spec.NodeID, bids.Status.OwnerID)
+}
+
+func (c *BackingImageDataSourceController) isMoreThanConcurrentBackingImageRestoreLimit() (bool, error) {
+	concurrentBackingImageRestoreLimit, err := c.ds.GetSettingAsInt(types.SettingNameConcurrentBackingImageRestoreLimit)
+	if err != nil {
+		return false, err
+	}
+
+	bidss, err := c.ds.ListBackingImageDataSources()
+	if err != nil {
+		return false, err
+	}
+
+	var inProgressBackingImage int64
+	for _, bids := range bidss {
+		if bids.Status.CurrentState == longhorn.BackingImageStateInProgress {
+			inProgressBackingImage++
+			if inProgressBackingImage >= concurrentBackingImageRestoreLimit {
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
 }
