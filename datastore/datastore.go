@@ -64,7 +64,7 @@ type DataStore struct {
 	BackingImageManagerInformer    cache.SharedInformer
 	backingImageDataSourceLister   lhlisters.BackingImageDataSourceLister
 	BackingImageDataSourceInformer cache.SharedInformer
-	bacupBackingImageLister        lhlisters.BackupBackingImageLister
+	backupBackingImageLister       lhlisters.BackupBackingImageLister
 	BackupBackingImageInformer     cache.SharedInformer
 	backupTargetLister             lhlisters.BackupTargetLister
 	BackupTargetInformer           cache.SharedInformer
