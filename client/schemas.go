@@ -9,6 +9,10 @@ type Schemas struct {
 	Collection
 	Data          []Schema `json:"data,omitempty"`
 	schemasByName map[string]*Schema
+	// test comment
+	unusedField string
+
+	unusedField2 string
 }
 
 func (s *Schema) CheckField(name string) (Field, bool) {
